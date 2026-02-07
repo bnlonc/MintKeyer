@@ -1,6 +1,7 @@
 #include <Arduino.h>
-#include "MorseCode.hpp"
-#include "MorseOutput.cpp"
+#include "MorseKeyer.h"
+#include "MorseConfig.h"
+#include "MorseOutput.h"
 
 // #define PROFILER
 // #define LED_DEMO
@@ -20,14 +21,13 @@ void setup() {
   pinMode(LEDB, OUTPUT);
   #endif
 
-  pinMode(AUDIO_PIN, OUTPUT);
+  MorseOutput::initializeAudioOutputPin();
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(LEFT_KEY_PIN, INPUT_PULLUP);
   pinMode(RIGHT_KEY_PIN, INPUT_PULLUP);
 
-  tone(AUDIO_PIN, 740, 100);
-  MorseCode::loadFlashValues();
-  MorseCode::sendString("OK");
+  MorseConfig::loadFlashValues();
+  MorseOutput::sendString("OK");
 }
 
 #ifdef PROFILER
@@ -70,12 +70,12 @@ void loop() {
   const bool dotButtonPressed = (digitalRead(LEFT_KEY_PIN) == 0);
   const bool dashButtonPressed = (digitalRead(RIGHT_KEY_PIN) == 0);
 
-  MorseCode::update(dotButtonPressed, dashButtonPressed, buttonPressed);
+  MorseKeyer::update(dotButtonPressed, dashButtonPressed, buttonPressed);
 
   #ifdef LED_DEMO
   /* The skip-related logic is used to only update the colour of the LED once every numberOfLedUpdatesToSkip calls. This is an 
   aesthetic thing to stop the LED from cycling way too fast when the program is running fast due to the debug flag in 
-  the MorseCode class being disabled. */
+  the MorseKeyer class being disabled. */
   if (skipCount >= numberOfLedUpdatesToSkip) {
     skipCount = 0; 
     cycleRgb();
