@@ -9,8 +9,18 @@
 #include "MorseOutput.cpp"
 unsigned short MorseOutput::tonePitch = 740;
 
+#include <NanoBLEFlashPrefs.h>
+NanoBLEFlashPrefs myFlashPrefs;
+typedef struct flashStruct
+{
+  unsigned short tonePitch;
+  unsigned short speedWpm;
+} flashPrefs;
+flashPrefs globalPrefs;
+
 unsigned short MorseCode::speedWpm = 15;
 unsigned int MorseCode::dotDurationMs = 80;
+char MorseCode::lastPlayedSymbol = MorseCode::CHAR_NIL;
 char MorseCode::currentlyPlayingSymbol = MorseCode::CHAR_NIL;
 char MorseCode::queuedSymbol = MorseCode::CHAR_NIL;
 unsigned long MorseCode::lastEventTimestamp = 0L;
@@ -74,37 +84,21 @@ void MorseCode::update(const bool dotKeyHeld, const bool dashKeyHeld, const bool
     #ifdef DEBUG
     Serial.println("Expired timer detected!");
     #endif
-    // if something is currently playing: 1. stop it 2. clear the currently playing symbol 3. set a new event timer for one dot from now 
+    // if something is currently playing: 1. stop it 2. clear the currently playing symbol 3. set a new event timer for 
+    // one dot from now for the inter-symbol space 
     if (MorseCode::currentlyPlayingSymbol != MorseCode::CHAR_NIL) {
       #ifdef DEBUG
       Serial.println("Just finished a symbol, starting timer for intra-character space.");
       #endif
       MorseOutput::turnOff();
+      MorseCode::lastPlayedSymbol = MorseCode::currentlyPlayingSymbol;
       MorseCode::currentlyPlayingSymbol = MorseCode::CHAR_NIL;
       MorseCode::setTimer(currentTimestamp, MorseCode::dotDurationMs);
     } 
     // else if a symbol is queued: 1. copy the symbol from queue to playing 2. clear the queue 3. start playing sound 4. set event timer as appropriate
     else if (MorseCode::queuedSymbol != MorseCode::CHAR_NIL) {
-      MorseCode::currentlyPlayingSymbol = MorseCode::queuedSymbol;
+      MorseCode::startAsyncSymbolPlay(MorseCode::queuedSymbol, currentTimestamp);
       MorseCode::queuedSymbol = MorseCode::CHAR_NIL;
-      MorseOutput::turnOn();
-      if (MorseCode::currentlyPlayingSymbol == MorseCode::CHAR_DOT) {
-        if (MorseCode::configModeEnabled) {
-          MorseCode::pushToBuffer(MorseCode::inputSymbolBuffer, MorseCode::INPUT_SYMBOL_BUFFER_SIZE, MorseCode::CHAR_DOT);
-        }
-        #ifdef DEBUG
-        Serial.println("Dot was queued, playing it now.");
-        #endif
-        MorseCode::setTimer(currentTimestamp, MorseCode::dotDurationMs);
-      } else {
-        if (MorseCode::configModeEnabled) {
-          MorseCode::pushToBuffer(MorseCode::inputSymbolBuffer, MorseCode::INPUT_SYMBOL_BUFFER_SIZE, MorseCode::CHAR_DASH);
-        }
-        #ifdef DEBUG
-        Serial.println("Dash was queued, playing it now.");
-        #endif
-        MorseCode::setTimer(currentTimestamp, MorseCode::dotDurationMs * 3);
-      }
     } 
     // else if nothing is playing or queued, clear the timer
     else {
@@ -118,13 +112,13 @@ void MorseCode::update(const bool dotKeyHeld, const bool dashKeyHeld, const bool
         MorseCode::pushToBuffer(MorseCode::inputCharacterBuffer, MorseCode::INPUT_CHARACTER_BUFFER_SIZE, inputChar);
         // Handle processing of commands 
         MorseCode::handleConfigCommand();
-        if (MorseCode::inputCharacterBuffer[MorseCode::INPUT_CHARACTER_BUFFER_SIZE - 1] != '\0') {
-          Serial.println("Exiting config mode");
-          MorseCode::configModeEnabled = false;
+        if (MorseCode::configModeEnabled && MorseCode::inputCharacterBuffer[MorseCode::INPUT_CHARACTER_BUFFER_SIZE - 1] != '\0') {
+          MorseCode::exitConfigMode(false);
         }
       }
     }
   } else {
+    // The event timer is disabled or not expired yet.
     #ifdef DEBUG
     if (timerEnabled) {
       Serial.println("Active timer; has not yet expired.");
@@ -132,7 +126,7 @@ void MorseCode::update(const bool dotKeyHeld, const bool dashKeyHeld, const bool
       Serial.println("No active timer.");
     }
     #endif
-    // if a symbol is playing...
+    // If a symbol is playing...
     if (MorseCode::currentlyPlayingSymbol != MorseCode::CHAR_NIL) {
       #ifdef DEBUG
       Serial.println("Something is playing...");
@@ -168,7 +162,7 @@ void MorseCode::update(const bool dotKeyHeld, const bool dashKeyHeld, const bool
         }
       }
     } 
-    // if a symbol isn't playing and the timer is disabled
+    // If a symbol isn't playing and the timer is disabled
     else if (!timerEnabled) {
       #ifdef DEBUG
       Serial.println("Nothing is playing and no timer is set.");
@@ -177,34 +171,55 @@ void MorseCode::update(const bool dotKeyHeld, const bool dashKeyHeld, const bool
         #ifdef DEBUG
         Serial.println("Handling initial press of dot key");
         #endif
-        MorseCode::currentlyPlayingSymbol = MorseCode::CHAR_DOT;
-        MorseOutput::turnOn();
-        MorseCode::setTimer(currentTimestamp, MorseCode::dotDurationMs);
-        if (MorseCode::configModeEnabled) {
-          MorseCode::pushToBuffer(MorseCode::inputSymbolBuffer, MorseCode::INPUT_SYMBOL_BUFFER_SIZE, MorseCode::CHAR_DOT);
-        }
+        MorseCode::startAsyncSymbolPlay(MorseCode::CHAR_DOT, currentTimestamp);
       } else if (dashKeyHeld) {
         #ifdef DEBUG
         Serial.println("Handling initial press of dash key");
         #endif
-        MorseCode::currentlyPlayingSymbol = MorseCode::CHAR_DASH;
-        MorseOutput::turnOn();
-        MorseCode::setTimer(currentTimestamp, MorseCode::dotDurationMs * 3);
-        if (MorseCode::configModeEnabled) {
-          MorseCode::pushToBuffer(MorseCode::inputSymbolBuffer, MorseCode::INPUT_SYMBOL_BUFFER_SIZE, MorseCode::CHAR_DASH);
-        }
+        MorseCode::startAsyncSymbolPlay(MorseCode::CHAR_DASH, currentTimestamp);
       } else if (configButtonHeld) {
         Serial.println("Entering config mode");
         MorseCode::configModeEnabled = true;
+        MorseOutput::playStartTone();
         // Clear out the input buffers
         memset(MorseCode::inputSymbolBuffer, 0, sizeof(MorseCode::inputSymbolBuffer));
         memset(MorseCode::inputCharacterBuffer, 0, sizeof(MorseCode::inputCharacterBuffer));
       }
-    } else {
+    } 
+    // If nothing is playing, the timer is enabled, and nothing is queued 
+    else if (MorseCode::queuedSymbol == MorseCode::CHAR_NIL) {
       #ifdef DEBUG
       Serial.println("Nothing is playing, but a timer is set. Doing nothing.");
       #endif
+      // Check if another key is being pressed during the post-symbol waiting period and queue it if so 
+      if (MorseCode::lastPlayedSymbol == MorseCode::CHAR_DOT && dashKeyHeld) {
+        MorseCode::queuedSymbol = MorseCode::CHAR_DASH;
+      } else if (MorseCode::lastPlayedSymbol == MorseCode::CHAR_DASH && dotKeyHeld) {
+        MorseCode::queuedSymbol = MorseCode::CHAR_DOT;
+      }
     }
+    // If nothing is playing, the timer is enabled, and there's something already waiting in the queue 
+    else {
+      #ifdef DEBUG
+      Serial.println("Nothing is playing, a timer is set, and something is already queued. Doing nothing.");
+      #endif
+    }
+  }
+}
+
+void MorseCode::startAsyncSymbolPlay(char symbolToPlay, unsigned long currentTimestamp) {
+  MorseCode::currentlyPlayingSymbol = symbolToPlay;
+  MorseOutput::turnOn();
+  if (symbolToPlay == MorseCode::CHAR_DOT) {
+    if (MorseCode::configModeEnabled) {
+      MorseCode::pushToBuffer(MorseCode::inputSymbolBuffer, MorseCode::INPUT_SYMBOL_BUFFER_SIZE, MorseCode::CHAR_DOT);
+    }
+    MorseCode::setTimer(currentTimestamp, MorseCode::dotDurationMs);
+  } else {
+    if (MorseCode::configModeEnabled) {
+      MorseCode::pushToBuffer(MorseCode::inputSymbolBuffer, MorseCode::INPUT_SYMBOL_BUFFER_SIZE, MorseCode::CHAR_DASH);
+    }
+    MorseCode::setTimer(currentTimestamp, MorseCode::dotDurationMs * 3);
   }
 }
 
@@ -238,40 +253,87 @@ void MorseCode::handleConfigCommand() {
   char debugBuffer[32];
   switch (MorseCode::inputCharacterBuffer[0]) {
     case 'S': 
-      if (MorseCode::inputCharacterBuffer[1] >= '2') {
+      if (!isDigitOrNull(MorseCode::inputCharacterBuffer[1]) || !isDigitOrNull(MorseCode::inputCharacterBuffer[2])) {
+        Serial.println("Exiting S for index 1");
+        exitConfigMode(false);
+        break;
+      }
+      if (MorseCode::inputCharacterBuffer[1] >= '5') {
         sprintf(debugBuffer, "Updating speed to %d", inputCharacterBuffer[1] - 48);
         Serial.println(debugBuffer);
         updateSpeed(inputCharacterBuffer[1] - 48);
+        exitConfigMode(true);
       } else if (MorseCode::inputCharacterBuffer[2] != '\0') {
         sprintf(debugBuffer, "Updating speed to %d", (inputCharacterBuffer[1] - 48) * 10 + (inputCharacterBuffer[2] - 48));
         Serial.println(debugBuffer);
         updateSpeed((inputCharacterBuffer[1] - 48) * 10 + (inputCharacterBuffer[2] - 48));
+        exitConfigMode(true);
       } 
       break;
     case 'T':
+      if (!isDigitOrNull(MorseCode::inputCharacterBuffer[1]) || !isDigitOrNull(MorseCode::inputCharacterBuffer[2])) {
+        Serial.println("Exiting S for index 1");
+        exitConfigMode(false);
+        break;
+      }
       if (MorseCode::inputCharacterBuffer[2] != '\0') {
         MorseOutput::tonePitch = (inputCharacterBuffer[1] - 48) * 100 + (inputCharacterBuffer[2] - 48) * 10;
+        storeFlashValues();
+        exitConfigMode(true);
       }
       break;
     case 'Q': 
       switch (MorseCode::inputCharacterBuffer[1]) {
         case 'S':
+          delay(MorseCode::dotDurationMs * 7);
           MorseCode::sendChar((MorseCode::speedWpm / 10) + 48);
+          delay(MorseCode::dotDurationMs);
           MorseCode::sendChar((MorseCode::speedWpm % 10) + 48);
+          exitConfigMode(true);
           break;
         case 'T':
+          delay(MorseCode::dotDurationMs * 7);
           MorseCode::sendChar((MorseOutput::tonePitch / 100) + 48);
+          delay(MorseCode::dotDurationMs);
           MorseCode::sendChar(((MorseOutput::tonePitch % 100) / 10) + 48);
+          delay(MorseCode::dotDurationMs);
           MorseCode::sendChar('0');
+          exitConfigMode(true);
+          break;
+        case '\0':
+          break;
+        default: 
+          Serial.println("Exiting default for Q index 1");
+          exitConfigMode(false);
           break;
       }
       break;
+    default:
+      Serial.println("Exiting default for index 0");
+      exitConfigMode(false);
+      break;
+  }
+}
+
+bool MorseCode::isDigitOrNull(char character) {
+  return (character >= '0' && character <= '9') || character == '\0';
+}
+
+void MorseCode::exitConfigMode(bool success) {
+  Serial.println("Exiting config mode");
+  delay(400);
+  MorseCode::configModeEnabled = false;
+  if (success) {
+    MorseOutput::playSuccessTone();
+  } else {
+    MorseOutput::playFailureTone();
   }
 }
 
 void MorseCode::sendString(char* stringToSend) {
   for (unsigned short index = 0; stringToSend[index] != '\0'; ++index) {
     MorseCode::sendChar(stringToSend[index]);
+    delay(MorseCode::dotDurationMs * 3);
   }
 }
 
@@ -314,6 +376,7 @@ void MorseCode::sendDash() {
 void MorseCode::updateSpeed(unsigned short newSpeedWpm) {
   MorseCode::speedWpm = newSpeedWpm;
   MorseCode::dotDurationMs = 60000 / (50 * speedWpm);
+  storeFlashValues();
 }
 
 void MorseCode::pushToBuffer(char* buffer, int bufferSize, char character) {
@@ -330,6 +393,18 @@ void MorseCode::pushToBuffer(char* buffer, int bufferSize, char character) {
 
   Serial.print("Buffer is now ");
   Serial.println(buffer);
+}
+
+void MorseCode::storeFlashValues() {
+  globalPrefs.tonePitch = MorseOutput::tonePitch;
+  globalPrefs.speedWpm = MorseCode::speedWpm;
+  myFlashPrefs.writePrefs(&globalPrefs, sizeof(globalPrefs));
+}
+
+void MorseCode::loadFlashValues() {
+  myFlashPrefs.readPrefs(&globalPrefs, sizeof(globalPrefs));
+  MorseOutput::tonePitch = globalPrefs.tonePitch;
+  MorseCode::updateSpeed(globalPrefs.speedWpm);
 }
 
 #endif

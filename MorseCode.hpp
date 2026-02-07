@@ -119,9 +119,9 @@ private:
   static constexpr int REVERSE_MAPPING_START_INDICES_BY_LENGTH[] = {0, 1, 3, 7, 15, 31};
   static unsigned short speedWpm;
   static unsigned int dotDurationMs;
+  static char lastPlayedSymbol;
   static char currentlyPlayingSymbol;
   static char queuedSymbol;
-  static char lastPlayedSymbol;
   static unsigned long lastEventTimestamp;
   static long eventInterval;
   static bool timerEnabled;
@@ -140,9 +140,14 @@ private:
   static void pushToBuffer(char* buffer, int bufferSize, char character);
 public: 
   static void update(const bool dotKeyHeld, const bool dashKeyHeld, const bool configButtonHeld);
+  static void startAsyncSymbolPlay(char symbolToPlay, unsigned long currentTimestamp);
+  static bool isDigitOrNull(char character);
+  static void exitConfigMode(bool success);
   static void sendString(char* stringToSend);
   static void sendDot();
   static void sendDash();
+  static void storeFlashValues();
+  static void loadFlashValues();
 };
 
 #endif

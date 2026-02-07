@@ -12,7 +12,6 @@ const int LEFT_KEY_PIN = D3;
 void setup() {
   // Set up serial 
   Serial.begin(9600);
-  delay(3000);
 
   // Initialize pins
   #ifdef LED_DEMO
@@ -25,6 +24,10 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(LEFT_KEY_PIN, INPUT_PULLUP);
   pinMode(RIGHT_KEY_PIN, INPUT_PULLUP);
+
+  tone(AUDIO_PIN, 740, 100);
+  MorseCode::loadFlashValues();
+  MorseCode::sendString("OK");
 }
 
 #ifdef PROFILER
