@@ -21,7 +21,8 @@ void MorseKeyer::update(const bool dotKeyHeld, const bool dashKeyHeld, const boo
   #endif
 
   const unsigned long currentTimestamp = millis();
-  // if the event timer is expired 
+  // Handle the paddles 
+  // if the event timer is set and expired 
   if (MorseKeyer::timerEnabled && currentTimestamp - MorseKeyer::lastEventTimestamp >= MorseKeyer::eventInterval) {
     #ifdef DEBUG
     Serial.println("Expired timer detected!");
@@ -110,7 +111,9 @@ void MorseKeyer::update(const bool dotKeyHeld, const bool dashKeyHeld, const boo
         #endif
         MorseKeyer::startAsyncSymbolPlay(MorseUtils::CHAR_DASH, currentTimestamp);
       } else if (configButtonHeld) {
-        MorseConfig::enableConfigMode();
+        MorseConfig::handleConfigButton(currentTimestamp);
+      } else {
+        MorseConfig::cancelResetHold();
       }
     } 
     // If nothing is playing, the timer is enabled, and nothing is queued 

@@ -9,6 +9,9 @@ bool MorseConfig::configModeEnabled = false;
 unsigned short MorseConfig::speedWpm = 15;
 char MorseConfig::inputSymbolBuffer[];
 char MorseConfig::inputCharacterBuffer[];
+unsigned long MorseConfig::configButtonStartTimestamp = 0L;
+bool MorseConfig::resetHold = false;
+bool MorseConfig::resetDone = false;
 
 #include <NanoBLEFlashPrefs.h>
 NanoBLEFlashPrefs myFlashPrefs;
@@ -19,15 +22,33 @@ typedef struct flashStruct
 } flashPrefs;
 flashPrefs globalPrefs;
 
-void MorseConfig::enableConfigMode() {
-  #ifdef DEBUG
-  Serial.println("Entering config mode");
-  #endif
-  MorseConfig::configModeEnabled = true;
-  MorseOutput::playStartTone();
-  // Clear out the input buffers
-  memset(MorseConfig::inputSymbolBuffer, 0, sizeof(MorseConfig::inputSymbolBuffer));
-  memset(MorseConfig::inputCharacterBuffer, 0, sizeof(MorseConfig::inputCharacterBuffer));
+void MorseConfig::handleConfigButton(unsigned long currentTimestamp) {
+  if (!MorseConfig::configModeEnabled) {
+    #ifdef DEBUG
+    Serial.println("Entering config mode");
+    #endif
+    MorseConfig::configModeEnabled = true;
+    MorseOutput::playStartTone();
+    // Clear out the input buffers
+    memset(MorseConfig::inputSymbolBuffer, 0, sizeof(MorseConfig::inputSymbolBuffer));
+    memset(MorseConfig::inputCharacterBuffer, 0, sizeof(MorseConfig::inputCharacterBuffer));
+
+    MorseConfig::resetHold = true;
+    MorseConfig::resetDone = false;
+    MorseConfig::configButtonStartTimestamp = currentTimestamp;
+  } else if (MorseConfig::resetHold && !MorseConfig::resetDone) {
+    #ifdef DEBUG
+    Serial.println("Config mode already enabled; handling reset hold");
+    #endif
+    if (currentTimestamp - MorseConfig::configButtonStartTimestamp >= MorseConfig::MILLIS_TO_RESET) {
+      MorseConfig::updateSpeed(DEFAULT_WPM);
+      MorseConfig::updateTone(DEFAULT_TONE);
+      MorseConfig::resetDone = true;
+      MorseConfig::exitConfigMode(true);
+    }
+  } else {
+    MorseConfig::exitConfigMode(true);
+  }
 }
 
 void MorseConfig::pushInputSymbol(char symbol) {
@@ -55,6 +76,11 @@ void MorseConfig::handleCharacterInput() {
 void MorseConfig::updateSpeed(unsigned short newSpeedWpm) {
   MorseConfig::speedWpm = newSpeedWpm;
   MorseOutput::dotDurationMs = 60000 / (50 * speedWpm);
+  storeFlashValues();
+}
+
+void MorseConfig::updateTone(unsigned short newTone) {
+  MorseOutput::tonePitch = newTone;
   storeFlashValues();
 }
 
@@ -105,7 +131,7 @@ void MorseConfig::handleConfigCommand() {
         sprintf(debugBuffer, "Updating speed to %d", newSpeed);
         Serial.println(debugBuffer);
         #endif
-        updateSpeed(newSpeed);
+        MorseConfig::updateSpeed(newSpeed);
         MorseConfig::exitConfigMode(true);
       } else if (MorseConfig::inputCharacterBuffer[2] != '\0') {
         const int newSpeed = MorseUtils::stringToInt(&(MorseConfig::inputCharacterBuffer[1]), 2);
@@ -113,7 +139,7 @@ void MorseConfig::handleConfigCommand() {
         sprintf(debugBuffer, "Updating speed to %d", newSpeed);
         Serial.println(debugBuffer);
         #endif
-        updateSpeed(newSpeed);
+        MorseConfig::updateSpeed(newSpeed);
         MorseConfig::exitConfigMode(true);
       } 
       break;
@@ -132,8 +158,7 @@ void MorseConfig::handleConfigCommand() {
         Serial.println(debugBuffer);
         delay(1000);
         #endif
-        MorseOutput::tonePitch = newTone;
-        storeFlashValues();
+        MorseConfig::updateTone(newTone);
         MorseConfig::exitConfigMode(true);
       }
       break;
@@ -172,6 +197,10 @@ void MorseConfig::handleConfigCommand() {
       MorseConfig::exitConfigMode(false);
       break;
   }
+}
+
+void MorseConfig::cancelResetHold() {
+  MorseConfig::resetHold = false;
 }
 
 #endif

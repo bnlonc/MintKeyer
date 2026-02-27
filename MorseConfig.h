@@ -6,17 +6,25 @@ class MorseConfig {
     static bool configModeEnabled;
     static unsigned short speedWpm;
     
-    static void enableConfigMode();
+    static void handleConfigButton(unsigned long currentTimestamp);
     static void pushInputSymbol(char symbol);
     static void handleCharacterInput();
     static void updateSpeed(unsigned short newSpeedWpm);
+    static void updateTone(unsigned short newTone);
     static void exitConfigMode(bool success); 
     static void loadFlashValues();
+    static void cancelResetHold();
   private:
     static constexpr unsigned short INPUT_SYMBOL_BUFFER_SIZE = 5;
     static char inputSymbolBuffer[INPUT_SYMBOL_BUFFER_SIZE];
     static constexpr unsigned short INPUT_CHARACTER_BUFFER_SIZE = 3;
     static char inputCharacterBuffer[INPUT_CHARACTER_BUFFER_SIZE];
+    static constexpr unsigned short MILLIS_TO_RESET = 5000;
+    static constexpr unsigned short DEFAULT_WPM = 15;
+    static constexpr unsigned short DEFAULT_TONE = 740;
+    static unsigned long configButtonStartTimestamp;
+    static bool resetHold;
+    static bool resetDone;
     
     static void storeFlashValues();
     static void handleConfigCommand();
